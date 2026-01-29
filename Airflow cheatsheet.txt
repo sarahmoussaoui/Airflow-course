@@ -1,0 +1,201 @@
+********************** RUN AIRFLOW IN PYTHON ENV**************************************************
+python -m venv <name-env>  : create venv
+<name-env>\Scripts\activate : activate venv
+$env:AIRFLOW_HOME = "." : changing directory where database is created
+airflow db init : initilizing a databse ( sql, log folder and some config files)
+airflow users create --username <username> --firstname <firstname> --lastname <lastname> --role Admin --email <email>
+pswrd is airflow
+airflow web server -p 8080 : start the web server
+airflow scheduler : start the scheduler ( might need to export as in command 1)
+************************************************************************
+
+************************ RUN AIRFLOW IN DOCKER  ************************************************
+curl -LfO "https://airflow.apache.org/docs/apache-airflow/2.10.0/docker-compose.yaml" : downloading the yaml files
+we then replaced celeryExecutor by LocalExecutor, and commented all celery related code lines
+mkdir logs plugins dags : created these directories
+docker compose up airflow-init : initiliase the databse
+echo AIRFLOW_UID=50000 > .env : setting id ( to get rid of warning , not necessary)
+docker compose up : running the container
+************************************************************************
+
+********************* AIRFLOW CONCEPTS ***************************************************
+Dag : directed acyclic graph , workflow meaning bunch of tasks ( nodes)
+A --> B--> C : B is upstream of C and downstream of A
+operators determine what tasks do : bashoperator, pythonoperator, customised operator...
+there are dependencies between tasks
+execution date : logical time and date
+task instance : run of a task at a specific execution date
+dag run : instanctiation of a dag containning task instances 
+task lifecycle : success , failed , no_status ,queued, ...
+  - no status : empty task instance 
+     - scheduled 
+            --> executor (put the task in the task queue) --> queued
+                --> Queued ( execute the task if worker free)
+                    --> Worker
+                        --> Running -->  ( in some cases ) Up for reschedule (task every time interval )
+                            --> success
+                            --> failed 
+                                        --> up for retry
+                            -->shutdown
+                        
+     - removed
+     - upstream failed
+     - skipped
+
+************************************************************************
+
+*************************** BASIC ARCHITECTURE *********************************************
+all webserver , scheduler , executor and worker have acced to the database and the dags
+the data engineer configure the airflow.cfg and can access threw the user interface 
+he is the author of the dags
+************************************************************************
+
+******************************** AIRFLOW DAGS ****************************************
+docker compose down -v : we are shutting down the containers as well as the volumes
+ AIRFLOW__CORE__LOAD_EXAMPLES: "false" : changed to false
+ docker compose up airflow-init 
+ docker compose up  -d
+create your first dag (python file) in the dags folder (bash operator)
+"    "     "    "   "   "   "   "   ""  "   "   "   "   ( python operator)
+creating tasks with task flow API --> view python file 
+
+************************************************************************
+
+*********************** AIRFLOW BACKFILL AND CATCHUP *************************************************
+CATCHUP --> view python file
+
+backfill :
+    docker exec -it <id_container> bash : enter the bash for the container of the scheduler
+    airflow dags backfill -s <start-date> -e <end-date> <dag_id>
+    exit the bash
+************************************************************************
+
+******************** AIRFLOW SHCEDULER WITH CRON EXPRESSION****************************************************
+we can use this website  : https://crontab.guru/
+
+************************************************************************
+
+************************* AIRFLOW DATABASE CONNECTION ***********************************************
+we can connect to : database servers, cloud servers ,other...
+we need credentials like host , user , pass..
+we can manage them by airflow  connection threw the UI
+
+we will access the docker compose yaml file and add the port to the postgres container 5432: 5432
+then we will execute this in the cmd :
+    > docker compose up -d --no-deps --build postgres  : no deps to not start the images it depends on
+lets connect it to dbbeaver  a cross platform database management tool
+we create a postgres connection
+then in the connection we create a new database called "test"
+now we create the python file dags_with_postgres_operator
+then we go ahead and create a connection threw the airflow web UI:
+    since we are using docker , we have to put "host.docker.internal" in the host fiedl
+
+check python file for more understanding
+************************************************************************
+
+**************************** AIRFLOW DOCKER INSTALL PYTHON PACKAGE ********************************************
+there are 2 ways to install python dependencies to airflow docker container:
+    - image extending (basic knowledge of docker)
+    - image customising (if you need to optimize image size for example)
+
+############ IMAGE EXTENDIND #######
+we create a requirmenets.txt file where we write "scikit-learn==0.24.2" as our dependency
+we now create a dockerfile where we extend the official airflow docker image with a new version
+we copy the txt file into the docker image
+we upgrade the pip version
+we run pip install to get all the dependencies installed
+we then run this command :
+    > docker build . --tag extending_airflow:latest
+
+we then open the yaml file and change the image tag to extending_airflow:latest 
+now lets create a dag file to verify is the scikitlearn package has been installed
+now we have to reboot the airflow web server and scheduelr services since we modified the image name in he yaml file
+    > docker compose up -d --no-deps --build airflow-webserver airflow-scheduler
+remark : in my case i had to create a .wslconfig txt file to allocate more memory to airflow : 
+    this is the content of the file :  
+        [wsl2]
+        memory=4GB  # Set this to at least 4GB for Airflow
+        processors=2  # Adjust the number of CPUs if needed
+    then to restart docker: 
+    > wsl --shutdown
+
+
+
+if we want to add a new dependency in the requirmenets.txt , we have to reboot  
+    > docker compose up -d --no-deps --build airflow-webserver airflow-scheduler
+
+remark :     also tried to change the port of the webserver to 8081 ( because of an error message)
+    !! in my case didnt work so lets use the 2nd method
+########################################
+
+####IMAGE CUSTOMISING ############
+we have to build it from airflow source code
+> cd desktop
+clone the airflow source code :
+> git clone https://github.com/apache/airflow.git
+
+then we open the airflow folder and locate the docker-context-files folder
+    python dependencies will be installed there
+    create the requirements txt file in it
+    > docker build . --build-arg AIRFLOW_VERSION = '2.0.1' --tag customising-airflow:latest
+    we now replace the docker image name in the yaml file by customising-airflow:latest
+    > docker compose up -d --no-deps --build airflow-webserver airflow-scheduler
+
+########################################
+************************************************************************
+
+***************************** AIRFLOW AWS S3 SENSOR OPERATOR*******************************************
+a sensor is like an operator that works like a trigger
+we're going to use minio which is a compatible open source  to aws cloud s3
+we can set the minio service in docker
+we access the minio website documentation and run the container using the code provided
+    docker run 
+   -p 9000:9000 
+   -p 9001:9001 
+   --name minio1 
+   -e "MINIO_ROOT_USER=ROOTUSER" 
+   -e "MINIO_ROOT_PASSWORD=CHANGEME123" 
+   quay.io/minio/minio server /data --console-address ":9001"
+we access the console(WEBUI) via the localhost , and log in
+we now create a bucket called airflow
+lets generate a csv file which will be uploaded later to our bucket
+we create a folder data , in which we create a csv file data.csv
+now we drag the file in the bucket
+lets build a dag to connect to our bucket  and sense the file's existance
+since minio is S3 api compatible, to connect to it we can use the aws S3 API which is included in the amazon airflow package
+we access the scheduler container bash and run:
+    > pip list | grep amazon : to check the version  ( in our case :  8.27.0)
+
+had a problem with the type of connection not showing S3 :
+ > pip install apache-airflow-providers-amazon
+rebooting : 
+ >docker compose up -d --no-deps --build airflow-webserver airflow-scheduler
+If S3 is not in the list, choose HTTP or Amazon Web Services, and manually configure the connection using the details needed for S3.
+adding in the conenction field extra this dictionnary:  
+    {"aws_access_key_id": "ROOTUSER","aws_secret_access_key":"CHANGEME123","host":"http://host.docker.internal:9000"}
+poke is the default mode for sensor operators, checks the file's existance every poke interval as long as it respects the limiter
+
+************************************************************************
+
+****************************** AIRFLOW HOOKS S3 POSTGRESQL ******************************************
+we create a csv file called orders, where we will try to import it to a postgres database
+then write a dag to query data from it to upload it into our s3 bucket
+steps :
+    connect to dbbeaver
+    create orders table
+    import orders.csv into dbbeaver
+    write the dag file :
+        a hook is basically a component that allows us to interact with external systems without worrying about the implementation
+        to query data we need the postgres hook 
+        we need to check the version of the installed postgres package
+        enter the scheduler container bash
+        pip list | grep postgre : to check the version 
+        we check the airflow documentation site and search the postgre providers section 
+        click python api 
+        we click on the hooks subpackage
+        we can establish a connection via the get_conn function 
+        we have to provide some crendentials to connect the hook 
+        we now write the dag file --> view python file
+        to upload into the s3 bucket, we have to check if the S3 hook is compatible with our amazon provider version
+            
+************************************************************************
