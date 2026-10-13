@@ -1,0 +1,4 @@
+airflow_meteo_project/venv
+.env
+airflow_meteo_project/steps.md
+airflow_meteo_project/scripts/commands_postgres.txt
